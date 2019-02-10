@@ -2,24 +2,26 @@ package xyz.prokosna.ttrack_device.service
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.location.*
-import android.os.Bundle
+import android.os.Looper
 import android.support.v4.app.ActivityCompat
+import android.util.Log
+import com.google.android.gms.location.*
+import com.google.android.gms.tasks.OnSuccessListener
 import xyz.prokosna.ttrack_device.model.DeviceTelemetry
 
 
 class TelemetryCollector(
-    private val context: Activity,
-    private val sensorManager: SensorManager,
-    private val locationManager: LocationManager
-) : SensorEventListener, LocationListener {
+    private val context: Context,
+    private val sensorManager: SensorManager
+) : SensorEventListener {
 
-    private val provider: String
+    // Sensors
     private val accSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
     private val rotSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
@@ -30,52 +32,40 @@ class TelemetryCollector(
     private val pressSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
     private val humidSensor = sensorManager.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY)
 
+    // FusedLocation
+    private val fusedLocationProviderClient: FusedLocationProviderClient =
+        LocationServices.getFusedLocationProviderClient(context)
+    private val settingsClient: SettingsClient = LocationServices.getSettingsClient(context)
+    private val locationSettingsRequest: LocationSettingsRequest
+    private val locationCallback: LocationCallback
+    private val locationRequest: LocationRequest
+    private var requestingLocationUpdates = false
+
     init {
-        val criteria = Criteria()
-        criteria.accuracy = Criteria.ACCURACY_FINE
-        criteria.powerRequirement = Criteria.POWER_HIGH
-        criteria.isAltitudeRequired = true
-        criteria.isSpeedRequired = false
-        criteria.isCostAllowed = true
-        criteria.isBearingRequired = false
-        criteria.horizontalAccuracy = Criteria.ACCURACY_HIGH
-        criteria.verticalAccuracy = Criteria.ACCURACY_HIGH
-        provider = locationManager.getBestProvider(criteria, true)
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(p0: LocationResult?) {
+                super.onLocationResult(p0)
+                if (p0 != null) {
+                    deviceTelemetry.location!!.lat = p0.lastLocation.latitude
+                    deviceTelemetry.location!!.lon = p0.lastLocation.longitude
+                    deviceTelemetry.location!!.alt = p0.lastLocation.altitude
+                }
+            }
+        }
+
+        locationRequest = LocationRequest()
+        locationRequest.priority = LocationRequest.PRIORITY_HIGH_ACCURACY
+        locationRequest.interval = 10000
+        locationRequest.fastestInterval = 5000
+        val builder = LocationSettingsRequest.Builder()
+        builder.addLocationRequest(locationRequest)
+        locationSettingsRequest = builder.build()
     }
 
     private val deviceTelemetry = DeviceTelemetry()
 
-    private fun checkPermissions() {
-        if (ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED ||
-            ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            ActivityCompat.requestPermissions(
-                context,
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
-                1000
-            )
-        }
-    }
-
     fun beginMonitoring() {
-        checkPermissions()
-        if (ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED &&
-            ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            locationManager.requestLocationUpdates(provider, 10000, 5.0f, this)
-        }
+        // Sensors
         sensorManager.registerListener(this, accSensor, SensorManager.SENSOR_DELAY_UI)
         sensorManager.registerListener(this, gyroSensor, SensorManager.SENSOR_DELAY_UI)
         sensorManager.registerListener(this, rotSensor, SensorManager.SENSOR_DELAY_UI)
@@ -85,11 +75,46 @@ class TelemetryCollector(
         sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_UI)
         sensorManager.registerListener(this, pressSensor, SensorManager.SENSOR_DELAY_UI)
         sensorManager.registerListener(this, humidSensor, SensorManager.SENSOR_DELAY_UI)
+
+        // Location
+        settingsClient.checkLocationSettings(locationSettingsRequest)
+            .addOnSuccessListener(context, object : OnSuccessListener<LocationSettingsResponse> {
+                override fun onSuccess(p0: LocationSettingsResponse?) {
+                    Log.i("debug", "All location settings are ok")
+                    if (ActivityCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.ACCESS_FINE_LOCATION
+                        ) != PackageManager.PERMISSION_GRANTED &&
+                        ActivityCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        return
+                    }
+                    fusedLocationProviderClient.requestLocationUpdates(
+                        locationRequest, locationCallback, Looper.myLooper()
+                    )
+                }
+            })
+            .addOnFailureListener(
+                context
+            ) { Log.i("debug", "Any settings are not good") }
+        requestingLocationUpdates = true
     }
 
     fun stopMonitoring() {
-        locationManager.removeUpdates(this)
+        // Sensors
         sensorManager.unregisterListener(this)
+
+        // Location
+        if (!requestingLocationUpdates) {
+            return
+        }
+        fusedLocationProviderClient.removeLocationUpdates(locationCallback)
+            .addOnCompleteListener(
+                context
+            ) { requestingLocationUpdates = false }
     }
 
     fun collect(): DeviceTelemetry {
@@ -140,34 +165,7 @@ class TelemetryCollector(
         }
     }
 
-    override fun onLocationChanged(location: Location?) {
-        if (location == null) {
-            return
-        }
-        deviceTelemetry.location!!.lat = location.latitude
-        deviceTelemetry.location!!.lon = location.longitude
-        deviceTelemetry.location!!.alt = location.altitude
-    }
-
-    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
-        when (status) {
-            LocationProvider.OUT_OF_SERVICE, LocationProvider.TEMPORARILY_UNAVAILABLE -> {
-                deviceTelemetry.location!!.lat = null
-                deviceTelemetry.location!!.lon = null
-                deviceTelemetry.location!!.alt = null
-            }
-        }
-    }
-
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        // Nothing to do
-    }
-
-    override fun onProviderEnabled(provider: String?) {
-        // Nothing to do
-    }
-
-    override fun onProviderDisabled(provider: String?) {
         // Nothing to do
     }
 }
