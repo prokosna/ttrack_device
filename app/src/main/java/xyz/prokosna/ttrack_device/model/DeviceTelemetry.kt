@@ -3,6 +3,8 @@ package xyz.prokosna.ttrack_device.model
 import com.google.gson.annotations.SerializedName
 import io.realm.RealmObject
 import io.realm.annotations.PrimaryKey
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.*
 
 open class DeviceTelemetry() : RealmObject() {
@@ -28,6 +30,8 @@ open class DeviceTelemetry() : RealmObject() {
     var pressure: Float? = null
     @SerializedName("humid")
     var humidity: Float? = null
+    @SerializedName("created_at")
+    var createdAt: String? = null
 
     fun copy(): DeviceTelemetry {
         val dest = DeviceTelemetry()
@@ -41,6 +45,7 @@ open class DeviceTelemetry() : RealmObject() {
         dest.light = light
         dest.pressure = pressure
         dest.humidity = humidity
+        dest.createdAt = DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(ZonedDateTime.now())
         return dest
     }
 }

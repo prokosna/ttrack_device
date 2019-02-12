@@ -53,14 +53,16 @@ class RealmStore(context: Context) {
 
     fun findAllDeviceTelemetry(): List<DeviceTelemetry> {
         val realm = Realm.getDefaultInstance()
-        return realm.where(DeviceTelemetry::class.java).findAll()
+        return realm.where(DeviceTelemetry::class.java).findAll().map {
+            realm.copyFromRealm(it)
+        }
     }
 
     fun getMetaStats(): MetaStats {
         val realm = Realm.getDefaultInstance()
         val meta = realm.where(MetaStats::class.java).findFirst()
         if (meta != null) {
-            return meta
+            return realm.copyFromRealm(meta)
         } else {
             throw RuntimeException("No MetaStats instances in Realm DB")
         }

@@ -1,7 +1,6 @@
 package xyz.prokosna.ttrack_device.service
 
 import android.Manifest
-import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.Sensor
@@ -78,7 +77,7 @@ class TelemetryCollector(
 
         // Location
         settingsClient.checkLocationSettings(locationSettingsRequest)
-            .addOnSuccessListener(context, object : OnSuccessListener<LocationSettingsResponse> {
+            .addOnSuccessListener(object : OnSuccessListener<LocationSettingsResponse> {
                 override fun onSuccess(p0: LocationSettingsResponse?) {
                     Log.i("debug", "All location settings are ok")
                     if (ActivityCompat.checkSelfPermission(
@@ -97,9 +96,7 @@ class TelemetryCollector(
                     )
                 }
             })
-            .addOnFailureListener(
-                context
-            ) { Log.i("debug", "Any settings are not good") }
+            .addOnFailureListener { Log.i("debug", "Any settings are not good") }
         requestingLocationUpdates = true
     }
 
@@ -112,9 +109,7 @@ class TelemetryCollector(
             return
         }
         fusedLocationProviderClient.removeLocationUpdates(locationCallback)
-            .addOnCompleteListener(
-                context
-            ) { requestingLocationUpdates = false }
+            .addOnCompleteListener { requestingLocationUpdates = false }
     }
 
     fun collect(): DeviceTelemetry {
